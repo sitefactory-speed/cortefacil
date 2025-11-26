@@ -1,106 +1,747 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Corte Fácil</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
-    <script>
-      tailwind.config = {
-        theme: {
-          extend: {
-            fontFamily: {
-              sans: ['Inter', 'sans-serif'],
-              display: ['Oswald', 'sans-serif'],
-            },
-            colors: {
-              brand: {
-                50: '#fff1f0',
-                100: '#ffdfdb',
-                200: '#ffc5be',
-                300: '#ff9d91',
-                400: '#ff6452',
-                500: '#f5361e', // Base Red/Orange aggressive
-                600: '#d91d06', // Darker Red
-                700: '#b51604',
-                800: '#94160a',
-                900: '#7a180e',
-                950: '#420804',
-              },
-              dark: {
-                900: '#050505', // Ultra Black
-                800: '#0f0f0f', // Off Black
-                700: '#1a1a1a', // Charcoal
-                600: '#262626', // Graphite
-                500: '#404040', // Metal
-              }
-            },
-            boxShadow: {
-              'glow': '0 0 20px -5px rgba(245, 54, 30, 0.5)',
-              'glow-sm': '0 0 10px -2px rgba(245, 54, 30, 0.3)',
-            },
-            animation: {
-              'fade-in': 'fadeIn 0.5s ease-out',
-              'slide-up': 'slideUp 0.4s ease-out',
-            },
-            keyframes: {
-              fadeIn: {
-                '0%': { opacity: '0' },
-                '100%': { opacity: '1' },
-              },
-              slideUp: {
-                '0%': { transform: 'translateY(10px)', opacity: '0' },
-                '100%': { transform: 'translateY(0)', opacity: '1' },
-              }
-            }
-          }
-        }
-      }
-    </script>
-    <style>
-      body {
-        background-color: #050505;
-        color: #e5e5e5;
-        -webkit-font-smoothing: antialiased;
-      }
-      /* Custom Scrollbar */
-      ::-webkit-scrollbar {
-        width: 6px;
-      }
-      ::-webkit-scrollbar-track {
-        background: #0f0f0f; 
-      }
-      ::-webkit-scrollbar-thumb {
-        background: #262626; 
-        border-radius: 3px;
-      }
-      ::-webkit-scrollbar-thumb:hover {
-        background: #f5361e; 
-      }
-      
-      /* Glassmorphism utility class */
-      .glass-panel {
-        background: rgba(26, 26, 26, 0.6);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border: 1px solid rgba(255, 255, 255, 0.05);
-      }
-    </style>
-  <script type="importmap">
-{
-  "imports": {
-    "react": "https://aistudiocdn.com/react@^19.2.0",
-    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
-    "react/": "https://aistudiocdn.com/react@^19.2.0/",
-    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0"
+import React, { useState, useEffect, useMemo } from 'react';
+import { Calendar, Clock, User as UserIcon, LogOut, Scissors, Plus, Trash2, CheckCircle, XCircle, Home, LayoutDashboard, ChevronRight, Star } from 'lucide-react';
+
+/**
+ * UTILITIES & TYPES
+ */
+
+// Colors derived from your index.html
+const COLORS = {
+  brand: '#f5361e', // Base Red
+  brandDark: '#d91d06',
+  dark900: '#050505',
+  dark800: '#0f0f0f',
+  dark700: '#1a1a1a',
+  text: '#e5e5e5',
+  glass: 'rgba(26, 26, 26, 0.8)',
+  glassBorder: 'rgba(255, 255, 255, 0.05)',
+};
+
+// Types
+type UserRole = 'ADMIN' | 'CLIENT';
+
+interface User {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  avatar?: string;
+}
+
+interface Service {
+  id: string;
+  name: string;
+  price: number;
+  duration: number; // in minutes
+  description: string;
+}
+
+interface Appointment {
+  id: string;
+  clientId: string;
+  clientName: string;
+  serviceId: string;
+  serviceName: string;
+  date: string; // ISO Date string
+  time: string;
+  status: 'PENDING' | 'CONFIRMED' | 'CANCELLED';
+  createdAt: number;
+}
+
+// Services Data
+const DEFAULT_SERVICES: Service[] = [
+  { id: '1', name: 'Corte Social', price: 45, duration: 30, description: 'Corte clássico com acabamento na tesoura e máquina.' },
+  { id: '2', name: 'Barba Premium', price: 35, duration: 25, description: 'Modelagem, toalha quente e massagem facial.' },
+  { id: '3', name: 'Corte + Barba', price: 75, duration: 50, description: 'Combo completo para renovar o visual.' },
+  { id: '4', name: 'Pezinho / Acabamento', price: 20, duration: 15, description: 'Manutenção dos contornos e nuca.' },
+  { id: '5', name: 'Selagem Capilar', price: 120, duration: 90, description: 'Alisamento e hidratação profunda.' },
+];
+
+/**
+ * MOCK DATABASE (LocalStorage)
+ */
+class MockDB {
+  private STORAGE_KEY = 'corte_facil_db_v1';
+  
+  constructor() {
+    this.init();
+  }
+
+  init() {
+    if (!localStorage.getItem(this.STORAGE_KEY)) {
+      const initialData = {
+        users: [
+          { id: 'admin1', name: 'Mestre Navalha', email: 'admin@cortefacil.com', password: 'admin', role: 'ADMIN' }
+        ],
+        appointments: []
+      };
+      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(initialData));
+    }
+  }
+
+  private getData() {
+    return JSON.parse(localStorage.getItem(this.STORAGE_KEY) || '{}');
+  }
+
+  private saveData(data: any) {
+    localStorage.setItem(this.STORAGE_KEY, JSON.stringify(data));
+  }
+
+  login(email: string, password: string): User | null {
+    const data = this.getData();
+    const user = data.users.find((u: any) => u.email === email && u.password === password);
+    if (user) {
+      const { password, ...safeUser } = user;
+      return safeUser;
+    }
+    return null;
+  }
+
+  register(name: string, email: string, password: string): User {
+    const data = this.getData();
+    if (data.users.find((u: any) => u.email === email)) {
+      throw new Error('Email já cadastrado');
+    }
+    const newUser = {
+      id: Math.random().toString(36).substr(2, 9),
+      name,
+      email,
+      password,
+      role: 'CLIENT' as UserRole
+    };
+    data.users.push(newUser);
+    this.saveData(data);
+    const { password: _, ...safeUser } = newUser;
+    return safeUser;
+  }
+
+  createAppointment(appointment: Omit<Appointment, 'id' | 'createdAt' | 'status'>): Appointment {
+    const data = this.getData();
+    const newAppointment: Appointment = {
+      ...appointment,
+      id: Math.random().toString(36).substr(2, 9),
+      status: 'PENDING',
+      createdAt: Date.now()
+    };
+    data.appointments.push(newAppointment);
+    this.saveData(data);
+    return newAppointment;
+  }
+
+  getAppointments(userId?: string, role?: UserRole): Appointment[] {
+    const data = this.getData();
+    if (role === 'ADMIN') {
+      return data.appointments.sort((a: Appointment, b: Appointment) => b.createdAt - a.createdAt);
+    }
+    return data.appointments
+      .filter((a: Appointment) => a.clientId === userId)
+      .sort((a: Appointment, b: Appointment) => b.createdAt - a.createdAt);
+  }
+
+  updateAppointmentStatus(id: string, status: Appointment['status']) {
+    const data = this.getData();
+    const index = data.appointments.findIndex((a: Appointment) => a.id === id);
+    if (index !== -1) {
+      data.appointments[index].status = status;
+      this.saveData(data);
+    }
   }
 }
-</script>
-<link rel="stylesheet" href="/index.css">
-</head>
-  <body>
-    <div id="root"></div>
-  <script type="module" src="/index.tsx"></script>
-</body>
-</html>
+
+const db = new MockDB();
+
+/**
+ * COMPONENTS
+ */
+
+// Reusable Button
+const Button = ({ children, variant = 'primary', className = '', ...props }: any) => {
+  const baseStyle = "px-6 py-3 rounded-lg font-bold transition-all duration-300 transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2";
+  const variants = {
+    primary: `bg-[#f5361e] hover:bg-[#d91d06] text-white shadow-[0_0_20px_-5px_rgba(245,54,30,0.5)]`,
+    secondary: `bg-[#262626] hover:bg-[#404040] text-white border border-white/10`,
+    ghost: `bg-transparent hover:bg-white/5 text-gray-400 hover:text-white`,
+    outline: `border border-[#f5361e] text-[#f5361e] hover:bg-[#f5361e] hover:text-white`
+  };
+
+  return (
+    <button className={`${baseStyle} ${variants[variant as keyof typeof variants]} ${className}`} {...props}>
+      {children}
+    </button>
+  );
+};
+
+// Card Component
+const Card = ({ children, className = '' }: any) => (
+  <div className={`bg-[#1a1a1a]/60 backdrop-blur-xl border border-white/5 rounded-xl p-6 ${className}`}>
+    {children}
+  </div>
+);
+
+// Input Component
+const Input = ({ label, icon: Icon, ...props }: any) => (
+  <div className="space-y-2">
+    {label && <label className="text-xs uppercase tracking-wider text-gray-400 font-bold ml-1">{label}</label>}
+    <div className="relative group">
+      {Icon && <Icon className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500 group-focus-within:text-[#f5361e] transition-colors" />}
+      <input 
+        className={`w-full bg-[#0f0f0f] border border-[#262626] rounded-lg py-3 px-4 ${Icon ? 'pl-12' : ''} text-white focus:outline-none focus:border-[#f5361e] focus:ring-1 focus:ring-[#f5361e] transition-all placeholder:text-gray-600`}
+        {...props} 
+      />
+    </div>
+  </div>
+);
+
+// Badge Component
+const StatusBadge = ({ status }: { status: string }) => {
+  const styles = {
+    PENDING: 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20',
+    CONFIRMED: 'bg-green-500/10 text-green-500 border-green-500/20',
+    CANCELLED: 'bg-red-500/10 text-red-500 border-red-500/20',
+  };
+  
+  const labels = {
+    PENDING: 'Pendente',
+    CONFIRMED: 'Confirmado',
+    CANCELLED: 'Cancelado',
+  };
+
+  return (
+    <span className={`px-3 py-1 rounded-full text-xs font-bold border ${styles[status as keyof typeof styles]}`}>
+      {labels[status as keyof typeof labels] || status}
+    </span>
+  );
+};
+
+/**
+ * PAGE: AUTHENTICATION (Login/Register)
+ */
+const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
+  const [isLogin, setIsLogin] = useState(true);
+  const [formData, setFormData] = useState({ name: '', email: '', password: '' });
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+    
+    // Simulate network delay
+    await new Promise(resolve => setTimeout(resolve, 800));
+
+    try {
+      let user;
+      if (isLogin) {
+        user = db.login(formData.email, formData.password);
+        if (!user) throw new Error('Credenciais inválidas');
+      } else {
+        user = db.register(formData.name, formData.email, formData.password);
+      }
+      onLogin(user);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-[#050505]">
+      {/* Background Ambience */}
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[500px] bg-[#f5361e] opacity-10 blur-[120px] rounded-full pointer-events-none" />
+      
+      <div className="w-full max-w-md relative z-10 animate-[fadeIn_0.5s_ease-out]">
+        <div className="text-center mb-8">
+           <div className="w-20 h-20 bg-gradient-to-br from-[#f5361e] to-[#94160a] rounded-2xl mx-auto mb-6 flex items-center justify-center shadow-[0_0_30px_-5px_rgba(245,54,30,0.4)] rotate-3 transform hover:rotate-0 transition-all duration-500">
+             <Scissors className="w-10 h-10 text-white" />
+           </div>
+           <h1 className="text-4xl font-black text-white tracking-tighter mb-2">
+             CORTE <span className="text-[#f5361e]">FÁCIL</span>
+           </h1>
+           <p className="text-gray-400">Sistema Premium de Agendamento</p>
+        </div>
+
+        <Card>
+          <div className="flex gap-2 mb-6 p-1 bg-[#0f0f0f] rounded-lg">
+            <button 
+              className={`flex-1 py-2 text-sm font-bold rounded-md transition-all ${isLogin ? 'bg-[#262626] text-white shadow-lg' : 'text-gray-500 hover:text-white'}`}
+              onClick={() => setIsLogin(true)}
+            >
+              ENTRAR
+            </button>
+            <button 
+              className={`flex-1 py-2 text-sm font-bold rounded-md transition-all ${!isLogin ? 'bg-[#262626] text-white shadow-lg' : 'text-gray-500 hover:text-white'}`}
+              onClick={() => setIsLogin(false)}
+            >
+              CADASTRAR
+            </button>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {!isLogin && (
+              <Input 
+                label="Nome Completo" 
+                icon={UserIcon} 
+                placeholder="Ex: João Silva" 
+                required
+                value={formData.name}
+                onChange={(e: any) => setFormData({...formData, name: e.target.value})}
+              />
+            )}
+            <Input 
+              label="E-mail" 
+              type="email" 
+              icon={Home} 
+              placeholder="seu@email.com" 
+              required
+              value={formData.email}
+              onChange={(e: any) => setFormData({...formData, email: e.target.value})}
+            />
+            <Input 
+              label="Senha" 
+              type="password" 
+              icon={Clock} 
+              placeholder="••••••••" 
+              required
+              value={formData.password}
+              onChange={(e: any) => setFormData({...formData, password: e.target.value})}
+            />
+
+            {error && (
+              <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-500 text-sm flex items-center gap-2">
+                <XCircle className="w-4 h-4" /> {error}
+              </div>
+            )}
+
+            <Button type="submit" className="w-full mt-2" disabled={loading}>
+              {loading ? 'Processando...' : (isLogin ? 'ACESSAR SISTEMA' : 'CRIAR CONTA')}
+            </Button>
+          </form>
+        </Card>
+      </div>
+    </div>
+  );
+};
+
+/**
+ * COMPONENT: BOOKING MODAL
+ */
+const BookingModal = ({ user, onClose, onSuccess }: { user: User, onClose: () => void, onSuccess: () => void }) => {
+  const [step, setStep] = useState(1);
+  const [selectedService, setSelectedService] = useState<Service | null>(null);
+  const [date, setDate] = useState('');
+  const [time, setTime] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  // Generate available times based on selected date (mock logic)
+  const availableTimes = useMemo(() => {
+    if (!date) return [];
+    const times = [];
+    for (let i = 9; i <= 19; i++) {
+      times.push(`${i}:00`);
+      times.push(`${i}:30`);
+    }
+    return times;
+  }, [date]);
+
+  const handleConfirm = async () => {
+    if (!selectedService || !date || !time) return;
+    setLoading(true);
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    db.createAppointment({
+      clientId: user.id,
+      clientName: user.name,
+      serviceId: selectedService.id,
+      serviceName: selectedService.name,
+      date,
+      time,
+    });
+    
+    setLoading(false);
+    onSuccess();
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-[fadeIn_0.2s_ease-out]">
+      <Card className="w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+            <Plus className="text-[#f5361e]" />
+            Novo Agendamento
+          </h2>
+          <button onClick={onClose} className="text-gray-500 hover:text-white"><XCircle /></button>
+        </div>
+
+        {/* Progress Steps */}
+        <div className="flex items-center gap-2 mb-8">
+          {[1, 2, 3].map((s) => (
+            <div key={s} className={`h-1 flex-1 rounded-full ${s <= step ? 'bg-[#f5361e]' : 'bg-[#262626]'}`} />
+          ))}
+        </div>
+
+        {step === 1 && (
+          <div className="space-y-3 animate-[slideUp_0.3s_ease-out]">
+            <p className="text-sm text-gray-400 uppercase tracking-wider font-bold mb-2">Selecione o Serviço</p>
+            {DEFAULT_SERVICES.map(service => (
+              <div 
+                key={service.id}
+                onClick={() => { setSelectedService(service); setStep(2); }}
+                className="p-4 rounded-xl bg-[#0f0f0f] border border-[#262626] hover:border-[#f5361e] cursor-pointer transition-all group flex justify-between items-center"
+              >
+                <div>
+                  <h3 className="font-bold text-white group-hover:text-[#f5361e] transition-colors">{service.name}</h3>
+                  <p className="text-sm text-gray-500">{service.description}</p>
+                  <p className="text-xs text-[#f5361e] mt-1 font-mono">{service.duration} min</p>
+                </div>
+                <div className="text-xl font-bold text-white">
+                  R$ {service.price}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {step === 2 && (
+          <div className="space-y-6 animate-[slideUp_0.3s_ease-out]">
+            <div>
+              <label className="block text-sm text-gray-400 uppercase font-bold mb-2">Data</label>
+              <input 
+                type="date" 
+                min={new Date().toISOString().split('T')[0]}
+                className="w-full bg-[#0f0f0f] border border-[#262626] rounded-lg p-3 text-white focus:border-[#f5361e] outline-none"
+                onChange={(e) => setDate(e.target.value)}
+              />
+            </div>
+            
+            {date && (
+              <div>
+                <label className="block text-sm text-gray-400 uppercase font-bold mb-2">Horário Disponível</label>
+                <div className="grid grid-cols-4 gap-2">
+                  {availableTimes.map(t => (
+                    <button
+                      key={t}
+                      onClick={() => setTime(t)}
+                      className={`py-2 rounded-lg text-sm font-medium transition-all ${time === t ? 'bg-[#f5361e] text-white' : 'bg-[#0f0f0f] text-gray-400 hover:bg-[#262626]'}`}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-between pt-4">
+              <Button variant="ghost" onClick={() => setStep(1)}>Voltar</Button>
+              <Button disabled={!date || !time} onClick={() => setStep(3)}>Continuar</Button>
+            </div>
+          </div>
+        )}
+
+        {step === 3 && selectedService && (
+          <div className="space-y-6 animate-[slideUp_0.3s_ease-out]">
+            <div className="bg-[#0f0f0f] p-6 rounded-xl border border-[#262626]">
+              <h3 className="text-gray-400 text-sm uppercase tracking-wider mb-4 font-bold">Resumo do Pedido</h3>
+              
+              <div className="space-y-4">
+                <div className="flex justify-between items-center border-b border-white/5 pb-4">
+                  <span className="text-white font-medium">{selectedService.name}</span>
+                  <span className="text-white font-bold">R$ {selectedService.price}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm text-gray-400">
+                  <span>Data</span>
+                  <span className="text-white">{new Date(date).toLocaleDateString('pt-BR')}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm text-gray-400">
+                  <span>Horário</span>
+                  <span className="text-white">{time}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm text-gray-400">
+                  <span>Profissional</span>
+                  <span className="text-white">Equipe Corte Fácil</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-between pt-4">
+              <Button variant="ghost" onClick={() => setStep(2)}>Voltar</Button>
+              <Button onClick={handleConfirm} disabled={loading}>
+                {loading ? 'Confirmando...' : 'Confirmar Agendamento'}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+};
+
+/**
+ * MAIN DASHBOARD
+ */
+const Dashboard = ({ user, onLogout }: { user: User, onLogout: () => void }) => {
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [showBooking, setShowBooking] = useState(false);
+  const [refresh, setRefresh] = useState(0);
+
+  useEffect(() => {
+    setAppointments(db.getAppointments(user.id, user.role));
+  }, [user, refresh]);
+
+  const handleStatusUpdate = (id: string, status: Appointment['status']) => {
+    db.updateAppointmentStatus(id, status);
+    setRefresh(p => p + 1);
+  };
+
+  const nextAppointment = appointments.find(a => a.status === 'CONFIRMED' || a.status === 'PENDING');
+
+  return (
+    <div className="min-h-screen bg-[#050505] text-[#e5e5e5] pb-12">
+      {/* HEADER */}
+      <nav className="sticky top-0 z-40 bg-[#050505]/80 backdrop-blur-md border-b border-white/5">
+        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+             <div className="w-8 h-8 bg-[#f5361e] rounded-lg flex items-center justify-center">
+               <Scissors className="w-5 h-5 text-white" />
+             </div>
+             <span className="font-black text-xl tracking-tighter">CORTE <span className="text-[#f5361e]">FÁCIL</span></span>
+          </div>
+          
+          <div className="flex items-center gap-4">
+             <div className="hidden md:block text-right">
+               <p className="text-sm font-bold text-white uppercase">{user.name}</p>
+               <p className="text-xs text-[#f5361e] font-medium">{user.role === 'ADMIN' ? 'ADMINISTRADOR' : 'CLIENTE VIP'}</p>
+             </div>
+             <div className="h-8 w-[1px] bg-white/10 hidden md:block"></div>
+             <button onClick={onLogout} className="p-2 hover:bg-white/5 rounded-full text-gray-400 hover:text-white transition-colors">
+               <LogOut className="w-5 h-5" />
+             </button>
+          </div>
+        </div>
+      </nav>
+
+      <main className="max-w-7xl mx-auto px-4 py-8">
+        
+        {/* WELCOME SECTION */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 gap-4 animate-[fadeIn_0.5s_ease-out]">
+          <div>
+            <h1 className="text-3xl font-light text-gray-400">Olá, <span className="text-white font-bold">{user.name.split(' ')[0]}</span></h1>
+            <p className="text-gray-500 mt-1">Gerencie seus agendamentos e visual</p>
+          </div>
+          {user.role === 'CLIENT' && (
+            <Button onClick={() => setShowBooking(true)} className="w-full md:w-auto shadow-[0_0_20px_-5px_rgba(245,54,30,0.5)]">
+              <Plus className="w-4 h-4" /> Novo Agendamento
+            </Button>
+          )}
+        </div>
+
+        {/* METRICS FOR ADMIN */}
+        {user.role === 'ADMIN' && (
+           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+             {[
+               { label: 'Hoje', val: appointments.filter(a => a.date === new Date().toISOString().split('T')[0]).length, icon: Calendar },
+               { label: 'Total', val: appointments.length, icon: LayoutDashboard },
+               { label: 'Faturamento (Est.)', val: `R$ ${appointments.filter(a => a.status === 'CONFIRMED').length * 45}`, icon: Star },
+               { label: 'Clientes', val: '124', icon: UserIcon },
+             ].map((stat, i) => (
+               <Card key={i} className="flex items-center gap-4 py-4">
+                 <div className="w-10 h-10 rounded-full bg-[#262626] flex items-center justify-center text-[#f5361e]">
+                   <stat.icon className="w-5 h-5" />
+                 </div>
+                 <div>
+                   <p className="text-gray-500 text-xs uppercase font-bold">{stat.label}</p>
+                   <p className="text-2xl font-bold text-white">{stat.val}</p>
+                 </div>
+               </Card>
+             ))}
+           </div>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          
+          {/* LEFT COLUMN: UPCOMING & LIST */}
+          <div className="lg:col-span-2 space-y-6">
+            
+            {/* NEXT APPOINTMENT CARD */}
+            {nextAppointment && user.role === 'CLIENT' && (
+              <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#1a1a1a] to-[#0f0f0f] border border-[#f5361e]/20 p-6 group">
+                <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                  <Scissors className="w-32 h-32 text-[#f5361e]" />
+                </div>
+                <div className="relative z-10">
+                  <div className="flex justify-between items-start mb-4">
+                    <span className="inline-block px-3 py-1 bg-[#f5361e] text-white text-xs font-bold rounded-full mb-2">PRÓXIMO HORÁRIO</span>
+                    <span className="text-gray-400 text-sm font-mono">{nextAppointment.id}</span>
+                  </div>
+                  <h3 className="text-2xl font-bold text-white mb-1">{nextAppointment.serviceName}</h3>
+                  <div className="flex items-center gap-4 text-gray-300 mt-4">
+                    <div className="flex items-center gap-2 bg-[#262626] px-3 py-1.5 rounded-lg">
+                      <Calendar className="w-4 h-4 text-[#f5361e]" />
+                      <span className="text-sm font-medium">{new Date(nextAppointment.date).toLocaleDateString('pt-BR')}</span>
+                    </div>
+                    <div className="flex items-center gap-2 bg-[#262626] px-3 py-1.5 rounded-lg">
+                      <Clock className="w-4 h-4 text-[#f5361e]" />
+                      <span className="text-sm font-medium">{nextAppointment.time}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* APPOINTMENT LIST */}
+            <div>
+              <h2 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                <LayoutDashboard className="w-5 h-5 text-[#f5361e]" />
+                {user.role === 'ADMIN' ? 'Todos Agendamentos' : 'Histórico'}
+              </h2>
+              
+              <div className="space-y-3">
+                {appointments.length === 0 ? (
+                  <div className="text-center py-12 bg-[#1a1a1a]/40 rounded-xl border border-dashed border-white/10">
+                    <p className="text-gray-500">Nenhum agendamento encontrado.</p>
+                    {user.role === 'CLIENT' && (
+                      <button onClick={() => setShowBooking(true)} className="text-[#f5361e] text-sm font-bold mt-2 hover:underline">
+                        Agendar agora
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  appointments.map((apt) => (
+                    <div key={apt.id} className="bg-[#1a1a1a] hover:bg-[#262626] border border-white/5 rounded-xl p-4 transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 group">
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-full bg-[#0f0f0f] flex items-center justify-center text-gray-400 group-hover:text-white transition-colors border border-white/5">
+                          <Scissors className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-white">{apt.serviceName}</h4>
+                          <p className="text-sm text-gray-500 flex items-center gap-2">
+                            {user.role === 'ADMIN' && <span className="text-[#f5361e]">{apt.clientName} •</span>}
+                            {new Date(apt.date).toLocaleDateString('pt-BR')} às {apt.time}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between md:justify-end gap-4 w-full md:w-auto border-t md:border-t-0 border-white/5 pt-3 md:pt-0">
+                        <StatusBadge status={apt.status} />
+                        
+                        {/* ACTION BUTTONS */}
+                        <div className="flex gap-2">
+                          {user.role === 'ADMIN' && apt.status === 'PENDING' && (
+                            <>
+                              <button onClick={() => handleStatusUpdate(apt.id, 'CONFIRMED')} className="p-2 bg-green-500/10 hover:bg-green-500/20 text-green-500 rounded-lg transition-colors" title="Confirmar">
+                                <CheckCircle className="w-4 h-4" />
+                              </button>
+                              <button onClick={() => handleStatusUpdate(apt.id, 'CANCELLED')} className="p-2 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-lg transition-colors" title="Cancelar">
+                                <XCircle className="w-4 h-4" />
+                              </button>
+                            </>
+                          )}
+                          
+                          {user.role === 'CLIENT' && apt.status === 'PENDING' && (
+                             <button onClick={() => handleStatusUpdate(apt.id, 'CANCELLED')} className="text-xs text-red-500 hover:text-red-400 font-medium px-3 py-1 rounded-lg border border-red-500/20 hover:bg-red-500/10 transition-colors">
+                               Cancelar
+                             </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* RIGHT COLUMN: PROMOTIONS/INFO */}
+          <div className="space-y-6">
+            <Card className="bg-gradient-to-br from-[#1a1a1a] to-[#0f0f0f]">
+              <h3 className="font-bold text-white mb-4">Nossos Serviços</h3>
+              <div className="space-y-3">
+                {DEFAULT_SERVICES.slice(0, 3).map(s => (
+                  <div key={s.id} className="flex justify-between items-center text-sm p-2 hover:bg-white/5 rounded-lg transition-colors cursor-default">
+                    <span className="text-gray-400">{s.name}</span>
+                    <span className="text-white font-mono font-bold">R$ {s.price}</span>
+                  </div>
+                ))}
+              </div>
+              <Button variant="outline" className="w-full mt-6 text-sm py-2">Ver Tabela Completa</Button>
+            </Card>
+
+            <div className="rounded-xl overflow-hidden relative h-48 group cursor-pointer">
+              <img src="https://images.unsplash.com/photo-1585747860715-2ba37e788b70?auto=format&fit=crop&q=80&w=800" alt="Promo" className="absolute inset-0 w-full h-full object-cover opacity-50 group-hover:scale-105 transition-transform duration-700" />
+              <div className="absolute inset-0 bg-gradient-to-t from-black via-black/50 to-transparent" />
+              <div className="absolute bottom-0 left-0 p-6">
+                <span className="text-[#f5361e] text-xs font-bold uppercase tracking-wider mb-1 block">Promoção</span>
+                <h3 className="text-xl font-bold text-white leading-tight">Combo <br/>Barba & Cabelo</h3>
+                <p className="text-gray-300 text-xs mt-2">Agende nas terças e ganhe 15% OFF</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      {showBooking && <BookingModal user={user} onClose={() => setShowBooking(false)} onSuccess={() => setRefresh(p => p+1)} />}
+    </div>
+  );
+};
+
+/**
+ * ROOT APP
+ */
+export default function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // Load custom fonts dynamically
+  useEffect(() => {
+    const link = document.createElement('link');
+    link.href = 'https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;700&family=Inter:wght@300;400;500;600&display=swap';
+    link.rel = 'stylesheet';
+    document.head.appendChild(link);
+
+    // Style injection for custom font families if Tailwind config isn't loaded
+    const style = document.createElement('style');
+    style.innerHTML = `
+      body { font-family: 'Inter', sans-serif; background-color: #050505; }
+      h1, h2, h3, h4, .font-display { font-family: 'Oswald', sans-serif; }
+      @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+      @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    `;
+    document.head.appendChild(style);
+
+    // Check auth
+    const storedUser = localStorage.getItem('corte_facil_user');
+    if (storedUser) {
+      setUser(JSON.parse(storedUser));
+    }
+    setLoading(false);
+
+    return () => {
+      document.head.removeChild(link);
+      document.head.removeChild(style);
+    };
+  }, []);
+
+  const handleLogin = (u: User) => {
+    setUser(u);
+    localStorage.setItem('corte_facil_user', JSON.stringify(u));
+  };
+
+  const handleLogout = () => {
+    setUser(null);
+    localStorage.removeItem('corte_facil_user');
+  };
+
+  if (loading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center text-[#f5361e] animate-pulse">Carregando...</div>;
+
+  return (
+    <div className="antialiased selection:bg-[#f5361e] selection:text-white">
+      {!user ? (
+        <AuthPage onLogin={handleLogin} />
+      ) : (
+        <Dashboard user={user} onLogout={handleLogout} />
+      )}
+    </div>
+  );
+}
